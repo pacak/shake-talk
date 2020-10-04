@@ -1,5 +1,8 @@
 module Greeter (main) where
 
-main :: IO ()
-main = putStrLn "Hello world"
+import People
+import Control.Monad
 
+main :: IO ()
+main = do
+    forM_ names $ \person -> putStrLn $ "Hello " ++ person

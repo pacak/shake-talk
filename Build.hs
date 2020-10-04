@@ -240,12 +240,12 @@ executablesRules = do
         -- don't do this
         unit $ cmd "ghc" "-c"
             (ghcBuildOptions buildType)
-            ("src" </> "Greeter.hs")
+            ("src" </> "People.hs")
 
         -- don't do this
         unit $ cmd "ghc" "-c"
             (ghcBuildOptions buildType)
-            ("src" </> "People.hs")
+            ("src" </> "Greeter.hs")
 
         cmd "ghc"
             [ "-o", f ]

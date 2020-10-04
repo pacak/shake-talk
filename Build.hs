@@ -250,5 +250,5 @@ executablesRules = do
         cmd "ghc"
             [ "-o", f ]
             (ghcBuildOptions buildType)
-            ["-main-is", mainModule]
-            ("src" </> mainModule <.> "hs")
+            ["_mk/8.8.4/O2/Main.o", "_mk/8.8.4/O2/People.o"]
+

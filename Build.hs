@@ -237,18 +237,7 @@ executablesRules = do
         let (buildType, path) = parseBuildPath f
         let Just mainModule = Map.lookup (takeBaseName path) executables
 
-        -- don't do this
-        unit $ cmd "ghc" "-c"
-            (ghcBuildOptions buildType)
-            ("src" </> "People.hs")
-
-        -- don't do this
-        unit $ cmd "ghc" "-c"
-            (ghcBuildOptions buildType)
-            ("src" </> "Greeter.hs")
-
         cmd "ghc"
             [ "-o", f ]
             (ghcBuildOptions buildType)
-            ["_mk/8.8.4/O2/Main.o", "_mk/8.8.4/O2/People.o"]
 

@@ -1,4 +1,4 @@
-module Main (main) where
+module Greeter (main) where
 
 import People
 import Control.Monad

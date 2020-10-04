@@ -16,6 +16,10 @@
 module Main (main) where
 
 import Data.Foldable
+import Data.List
+import Data.Map.Strict (Map)
+import qualified Data.Map.Strict as Map
+import Data.Maybe
 import qualified Data.Set as Set
 import Development.Shake
 import Development.Shake.FilePath
@@ -25,6 +29,7 @@ import System.Console.GetOpt
 import qualified System.Environment as IO
 import System.Posix.IO (stdOutput)
 import System.Posix.Terminal (queryTerminal)
+import Text.Read
 import Text.Regex (matchRegex, mkRegex)
 
 -- | The version and location of GHC that is running this script. It is also the version
@@ -138,3 +143,101 @@ main = do
                               : cosmeticGhcOptions opts }
                     else opts
                 want targets
+                knownExecutablesRules opts'
+
+
+
+-- GHC Haskell compilation 101:
+-- *.hs or *.lhs gets compiled into *.o and *.hi where
+-- *.o is an object file that will be linked in
+-- *.hi is an interface file that contains meta information
+-- https://gitlab.haskell.org/ghc/ghc/-/wikis/commentary/compiler/iface-files
+
+executables :: Map String String
+executables = Map.fromList [("greeter", "Greeter")]
+
+-- Shake compilation 101
+-- Two types of rules:
+-- - rules that generate a specific file - file rules
+-- - rules that don't produce anything but can ask for things - phony rules
+-- https://hackage.haskell.org/package/shake-0.18.5/docs/Development-Shake.html#v:phony
+
+-- In order to know what needs to be recompiled
+-- between runs shake needs to know what changed so
+-- rules should not depend on command line parameters directly
+-- if you expect for something to get recompiled when
+-- the value changes
+--
+-- There are several ways to pass this information to shake:
+-- - via oracles - shake will rerun rule when oracle changes
+-- - via locations - different file locations to different options:
+-- _mk/8.8.4/O2/hello.exe -- release version, no profiling
+-- _mk/8.8.4/O2/hello.p_exe -- release version, profiling
+-- _mk/8.8.4/O0/hello.exe -- fast build
+--
+-- Passing info via locations allows to switch between profiling/non profiling
+-- or optimized/non optimized build without recompiling all the things
+
+
+data BuildType
+    = BuildType
+    { buildOptimization :: !Int
+    , buildProfiling :: !Bool
+    } deriving (Eq, Show)
+
+fastestBuild :: BuildType
+fastestBuild = BuildType { buildOptimization = 0, buildProfiling = False }
+
+releaseBuild :: BuildType
+releaseBuild = BuildType { buildOptimization = 2, buildProfiling = False }
+
+getBuildType :: BuildOptions -> BuildType
+getBuildType buildOptions = BuildType
+    { buildOptimization = optimization buildOptions
+    , buildProfiling = prof buildOptions
+    }
+
+buildTypeToString :: BuildType -> String
+buildTypeToString BuildType{..} = 'O' : show buildOptimization
+
+
+-- | Take a path into some build dir, and decompose it.
+--
+-- Since ghc needs non-profiling code to run TH in compilation with profiling enabled and it's
+-- looking for said code in the same folder as profiling code - this parser assumes that
+-- profiling state is stored as part of file name suffix. As such only a subset of filetypes is
+-- supported
+parseBuildPath
+    :: FilePath
+    -> (BuildType, FilePath{- leftover path from build dir-})
+parseBuildPath path = fromMaybe (error $ "Not a valid path: " ++ path) $ do
+    (_prefix : ('O':opt) : rest) <- splitDirectories <$> stripPrefix makeDir path
+    buildOptimization <- readMaybe opt
+    let buildProfiling = isProfiling path
+    pure (BuildType{..}, joinPath rest)
+
+isProfiling :: FilePath -> Bool
+isProfiling fp = case takeExtension fp of
+    ".hi" -> False
+    ".o" -> False
+    ".exe" -> False
+    ".p_hi" -> True
+    ".p_o" -> True
+    ".p_exe" -> True
+    unk -> error $ "unsupported file type: " ++ show fp ++ ", extension was " ++ show unk
+
+
+knownExecutablesRules :: BuildOptions -> Rules ()
+knownExecutablesRules opts = phonys $ \name -> do
+    -- check if this executable is known to compiler
+    _mainModule <- Map.lookup name executables
+
+    pure $ do
+        let buildType = getBuildType opts
+            ext = if prof opts then "p_exe" else "exe"
+        let exec = makeDir </> buildTypeToString buildType </> name <.> ext
+        need [exec]
+        liftIO $ createDirectoryIfMissing True "bin"
+        cmd "ln" ["--symbolic", "--relative", "--force", "--no-target-directory"]
+            exec ("bin" </> name)
+

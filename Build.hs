@@ -15,6 +15,7 @@
 
 module Main (main) where
 
+import Control.Monad.IO.Class
 import Data.Foldable
 import Data.List
 import Data.Map.Strict (Map)
@@ -26,6 +27,7 @@ import Development.Shake.FilePath
 import Development.Shake.Util
 import qualified GHC.Paths
 import System.Console.GetOpt
+import System.Directory
 import qualified System.Environment as IO
 import System.Posix.IO (stdOutput)
 import System.Posix.Terminal (queryTerminal)
@@ -59,6 +61,7 @@ data BuildOptions = BuildOptions
     , cosmeticGhcOptions :: [String] -- should not affect compilation results
     } deriving (Eq, Show)
 
+-- {{{
 defaultBuildOptions :: BuildOptions
 defaultBuildOptions = BuildOptions
     { optimization = 2
@@ -117,8 +120,11 @@ optDescrs =
 getShakeVersion :: IO String
 getShakeVersion = getHashedShakeVersion ["Build.hs"]
 
+-- }}}
+
 main :: IO ()
 main = do
+-- {{{
     -- disable environment file
     IO.setEnv "GHC_ENVIRONMENT" "-"
     version <- getShakeVersion
@@ -131,10 +137,9 @@ main = do
             , shakeChange = ChangeModtimeAndDigest
             , shakeColor = istty
             }
-
+-- }}}
     shakeArgsAccumulate shakeOpts optDescrs defaultBuildOptions $
         \opts targets -> do
-            putStrLn $ "I'm about to compile " ++ show targets ++ " using " ++ show opts
             pure . Just $ do
                 colorize <- shakeColor <$> getShakeOptionsRules
 
@@ -144,40 +149,13 @@ main = do
                     else opts
                 want targets
                 knownExecutablesRules opts'
+                executablesRules
 
-
-
--- GHC Haskell compilation 101:
--- *.hs or *.lhs gets compiled into *.o and *.hi where
--- *.o is an object file that will be linked in
--- *.hi is an interface file that contains meta information
--- https://gitlab.haskell.org/ghc/ghc/-/wikis/commentary/compiler/iface-files
 
 executables :: Map String String
 executables = Map.fromList [("greeter", "Greeter")]
 
--- Shake compilation 101
--- Two types of rules:
--- - rules that generate a specific file - file rules
--- - rules that don't produce anything but can ask for things - phony rules
--- https://hackage.haskell.org/package/shake-0.18.5/docs/Development-Shake.html#v:phony
-
--- In order to know what needs to be recompiled
--- between runs shake needs to know what changed so
--- rules should not depend on command line parameters directly
--- if you expect for something to get recompiled when
--- the value changes
---
--- There are several ways to pass this information to shake:
--- - via oracles - shake will rerun rule when oracle changes
--- - via locations - different file locations to different options:
--- _mk/8.8.4/O2/hello.exe -- release version, no profiling
--- _mk/8.8.4/O2/hello.p_exe -- release version, profiling
--- _mk/8.8.4/O0/hello.exe -- fast build
---
--- Passing info via locations allows to switch between profiling/non profiling
--- or optimized/non optimized build without recompiling all the things
-
+-- {{{
 
 data BuildType
     = BuildType
@@ -226,6 +204,18 @@ isProfiling fp = case takeExtension fp of
     ".p_exe" -> True
     unk -> error $ "unsupported file type: " ++ show fp ++ ", extension was " ++ show unk
 
+ghcBuildOptions :: BuildType -> [String]
+ghcBuildOptions bt@BuildType{..} = concat
+    [ ["-j1"]
+    , ["-O" ++ show buildOptimization]
+    , if not buildProfiling then [] else
+        words "-prof -fprof-auto-exported -osuf p_o -hisuf p_hi"
+    , do opt <- [ "-odir", "-hidir", "-i", "-outputdir" ]
+         pure $ opt ++ makeDir </> buildTypeToString bt
+    ]
+
+
+-- }}}
 
 knownExecutablesRules :: BuildOptions -> Rules ()
 knownExecutablesRules opts = phonys $ \name -> do
@@ -235,9 +225,19 @@ knownExecutablesRules opts = phonys $ \name -> do
     pure $ do
         let buildType = getBuildType opts
             ext = if prof opts then "p_exe" else "exe"
-        let exec = makeDir </> buildTypeToString buildType </> name <.> ext
+        let exec = makeDir </> buildTypeToString buildType </> "execs" </> name <.> ext
         need [exec]
         liftIO $ createDirectoryIfMissing True "bin"
         cmd "ln" ["--symbolic", "--relative", "--force", "--no-target-directory"]
             exec ("bin" </> name)
 
+executablesRules :: Rules ()
+executablesRules = do
+    makeDir </> "*" {- opt level -} </> "execs" </> "*"%> \f -> do
+        let (buildType, path) = parseBuildPath f
+        let Just mainModule = Map.lookup (takeBaseName path) executables
+        cmd "ghc"
+            [ "-o", f ]
+            (ghcBuildOptions buildType)
+            ["-main-is", mainModule]
+            ("src" </> mainModule <.> "hs")

@@ -347,7 +347,8 @@ objectFile bt modName = makeDir </> buildTypeToString bt </> "src"
     </> replaceChar '.' '/' modName <.>
     if buildProfiling bt then "p_o" else "o"
 
-
+sourcePath :: Module -> FilePath
+sourcePath modName = "src" </> replaceChar '.' '/' modName <.> "hs"
 
 knownExecutablesRules :: BuildOptions -> Rules ()
 knownExecutablesRules opts = phonys $ \name -> do
@@ -378,4 +379,18 @@ executablesRules = do
             [ "-o", f ]
             (ghcBuildOptions buildType)
             objectFiles
+
+    makeDir </> "*" </> "src" </> "*" %> \f -> do
+        let (buildType, pathToModule -> modName) = parseBuildPath f
+
+
+        allDeps <- askOracle (ModuleDeps modName)
+        let localDeps = [otherModule | LocalModuleDep otherModule <- allDeps]
+
+        let objectFiles = map (objectFile buildType) localDeps
+
+        need objectFiles
+
+        let hs = sourcePath modName
+        cmd "ghc -c" hs  (ghcBuildOptions buildType)
 

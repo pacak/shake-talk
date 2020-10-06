@@ -375,10 +375,19 @@ executablesRules = do
 
         let objectFiles = map (objectFile buildType) localDeps
         need objectFiles
+
+        let mainHs = f -<.> "hs"
+            mainObj = f -<.> "o"
+        writeFileChanged mainHs ("module Main (main) where\nimport " ++ mainModule ++ "(main)")
+
+        unit $ cmd "ghc -c" mainHs ["-o", mainObj]
+            (ghcBuildOptions buildType)
+
+
         cmd "ghc"
             [ "-o", f ]
             (ghcBuildOptions buildType)
-            objectFiles
+            objectFiles mainObj
 
     makeDir </> "*" </> "src" </> "*" %> \f -> do
         let (buildType, pathToModule -> modName) = parseBuildPath f

@@ -341,6 +341,14 @@ stripVersion str = maybe str (Cabal.unPackageName . Cabal.pkgName)
     $ Cabal.simpleParse str
 
 
+-- | The location of a local object file
+objectFile :: BuildType -> Module -> FilePath
+objectFile bt modName = makeDir </> buildTypeToString bt </> "src"
+    </> replaceChar '.' '/' modName <.>
+    if buildProfiling bt then "p_o" else "o"
+
+
+
 knownExecutablesRules :: BuildOptions -> Rules ()
 knownExecutablesRules opts = phonys $ \name -> do
     -- check if this executable is known to compiler
@@ -362,9 +370,12 @@ executablesRules = do
         let Just mainModule = Map.lookup (takeBaseName path) executables
 
         allDeps <- askOracle (ModuleDeps mainModule)
-        liftIO $ print allDeps
+        let localDeps = mainModule : [otherModule | LocalModuleDep otherModule <- allDeps]
 
+        let objectFiles = map (objectFile buildType) localDeps
+        need objectFiles
         cmd "ghc"
             [ "-o", f ]
             (ghcBuildOptions buildType)
+            objectFiles
 

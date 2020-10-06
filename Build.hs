@@ -381,13 +381,13 @@ executablesRules = do
         writeFileChanged mainHs ("module Main (main) where\nimport " ++ mainModule ++ "(main)")
 
         unit $ cmd "ghc -c" mainHs ["-o", mainObj]
-            (ghcBuildOptions buildType)
+            (ghcBuildOptions buildType) (Traced "Compiling main.hs")
 
 
         cmd "ghc"
             [ "-o", f ]
             (ghcBuildOptions buildType)
-            objectFiles mainObj
+            objectFiles mainObj (Traced $ "Compiling " ++ takeBaseName path)
 
     makeDir </> "*" </> "src" </> "*" %> \f -> do
         let (buildType, pathToModule -> modName) = parseBuildPath f
